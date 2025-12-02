@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include "draw.h"
+#include <math.h>
 
 #define TRIANGLE_COUNT 1000
 #define MULTILINE_STR(...) #__VA_ARGS__

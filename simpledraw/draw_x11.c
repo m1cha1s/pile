@@ -8,9 +8,41 @@
 #include <unistd.h>
 
 #include <GL/gl.h>
+#include <GL/glext.h>
 #include <GL/glx.h>
 
 #include "draw.h"
+
+#include <exmath.h>
+
+#define GLPROCS \
+    X(PFNGLCREATESHADERPROC, glCreateShader) \
+    X(PFNGLSHADERSOURCEPROC, glShaderSource) \
+    X(PFNGLCOMPILESHADERPROC, glCompileShader) \
+    X(PFNGLGETSHADERIVPROC, glGetShaderiv) \
+    X(PFNGLGETSHADERINFOLOGPROC, glGetShaderInfoLog) \
+    X(PFNGLCREATEPROGRAMPROC, glCreateProgram) \
+    X(PFNGLATTACHSHADERPROC, glAttachShader) \
+    X(PFNGLLINKPROGRAMPROC, glLinkProgram) \
+    X(PFNGLDELETESHADERPROC, glDeleteShader) \
+    X(PFNGLGETPROGRAMIVPROC, glGetProgramiv) \
+    X(PFNGLGETPROGRAMINFOLOGPROC, glGetProgramInfoLog) \
+    X(PFNGLDELETEPROGRAMPROC, glDeleteProgram) \
+    X(PFNGLGENVERTEXARRAYSPROC, glGenVertexArrays) \
+    X(PFNGLGENBUFFERSPROC, glGenBuffers) \
+    X(PFNGLBINDVERTEXARRAYPROC, glBindVertexArray) \
+    X(PFNGLBINDBUFFERPROC, glBindBuffer) \
+    X(PFNGLBUFFERDATAPROC, glBufferData) \
+    X(PFNGLVERTEXATTRIBPOINTERPROC, glVertexAttribPointer) \
+    X(PFNGLENABLEVERTEXATTRIBARRAYPROC, glEnableVertexAttribArray) \
+    X(PFNGLUSEPROGRAMPROC, glUseProgram) \
+    X(PFNGLBUFFERSUBDATAPROC, glBufferSubData) \
+    X(PFNGLGETUNIFORMLOCATIONPROC, glGetUniformLocation) \
+    X(PFNGLUNIFORM2FPROC, glUniform2f)
+
+#define X(type, name) type name = NULL;
+GLPROCS;
+#undef X
 
 static Display *display;
 static Screen *screen;
@@ -21,10 +53,12 @@ static int running;
 static GLXContext context = 0;
 static Atom atomWmDeleteWindow;
 
-uint32_t D_ClearColor;
-uint32_t D_FillColor;
+float DeltaTime = 0;
+Vector2 mousePos = {0};
 
 typedef GLXContext (*glxCreateContextAttribsARBProc)(Display *, GLXFBConfig, GLXContext, Bool, const int *);
+
+void D_GL_Init(void);
 
 void D_Init(void)
 {
@@ -126,7 +160,7 @@ void D_Init(void)
 
     int ctxAttribs[] = {
         GLX_CONTEXT_MAJOR_VERSION_ARB, 3,
-        GLX_CONTEXT_MINOR_VERSION_ARB, 2,
+        GLX_CONTEXT_MINOR_VERSION_ARB, 3,
         GLX_CONTEXT_FLAGS_ARB, GLX_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB,
         None
     };
@@ -150,6 +184,12 @@ void D_Init(void)
     printf( "GL Version:   %s\n", glGetString(GL_VERSION) );
     printf( "GLSL Version: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION) );
 
+#define X(type, name) name = (type)glXGetProcAddress( #name ); if (!name) exit(1);
+    GLPROCS;
+#undef X
+
+    D_GL_Init();
+
     XClearWindow( display, window );
     XMapRaised( display, window );
 
@@ -164,7 +204,7 @@ void D_Deinit(void)
 int D_Running(void)
 {
     XEvent ev;
-    if (XPending( display ) > 0)
+    while (XPending( display ) > 0)
     {
         XNextEvent( display, &ev );
         if (ev.type == ClientMessage)
@@ -172,6 +212,13 @@ int D_Running(void)
             if (ev.xclient.data.l[0] == atomWmDeleteWindow) running = 0;
         }
     }
+
+    int mousex, mousey;
+    unsigned int mask;
+    XQueryPointer(display, window, &rootWindow, &rootWindow, &mousex, &mousey, &mousex, &mousey, &mask);
+
+    mousePos.x = mousex;
+    mousePos.y = mousey;
 
     return running;
 }
@@ -184,28 +231,19 @@ void D_SetWindowTitle( const char *title )
 {
 }
 
-void D_ClearScreen(void)
-{
-    float r = (float)((D_ClearColor >> 24)&0xFF)/255.f;
-    float g = (float)((D_ClearColor >> 16)&0xFF)/255.f;
-    float b = (float)((D_ClearColor >> 8)&0xFF)/255.f;
-    float a = (float)((D_ClearColor)&0xFF)/255.f;
-    glClearColor(r, g, b, a);
-    glClear(GL_COLOR_BUFFER_BIT);
-}
-
 void D_Present(void)
 {
     glXSwapBuffers( display, window ); 
 }
 
-void D_DrawFilledRect(int, int, int, int)
+void D_GetWindowDims( int *x, int *y )
 {
-    float r = (float)((D_ClearColor >> 24)&0xFF)/255.f;
-    float g = (float)((D_ClearColor >> 16)&0xFF)/255.f;
-    float b = (float)((D_ClearColor >> 8)&0xFF)/255.f;
-    float a = (float)((D_ClearColor)&0xFF)/255.f;
-
-    
+    XWindowAttributes attrs;
+    XGetWindowAttributes(display, window, &attrs);
+	*x = attrs.width;
+	*y = attrs.height;
 }
+
+#include "draw_gl.c"
+
 

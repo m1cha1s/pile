@@ -5,7 +5,7 @@ OsName=$(uname -s)
 case $OsName in
   Linux*)
     echo "Compiling for Linux"
-    cc -o test test.c draw_x11.c -lX11 -lGL -I..
+    cc -o test test.c draw_x11.c -lX11 -lm -lGL -I..
     ;;
   Darwin*)
     echo "Compiling for MacOS"

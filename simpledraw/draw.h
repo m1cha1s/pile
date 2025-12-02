@@ -4,6 +4,14 @@
 #include <exmath.h>
 #include <stdint.h>
 
+#ifndef true
+#define true (1)
+#endif
+
+#ifndef false
+#define false (0)
+#endif
+
 extern uint32_t D_ClearColor;
 extern uint32_t D_FillColor;
 extern float D_StrokeWidth;
