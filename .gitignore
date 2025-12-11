@@ -1,0 +1,7 @@
+.idea/
+.vscode/
+*.dSYM
+*.out
+
+aoc
+

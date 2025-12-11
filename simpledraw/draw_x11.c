@@ -243,7 +243,3 @@ void D_GetWindowDims( int *x, int *y )
 	*x = attrs.width;
 	*y = attrs.height;
 }
-
-#include "draw_gl.c"
-
-

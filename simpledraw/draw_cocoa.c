@@ -51,6 +51,7 @@ extern void * NSApp;
 #include <mach/mach.h>
 
 /* #include <AVFoundation/AVFoundation.h> */
+#include <AudioUnit/AudioUnit.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <objc/NSObjCRuntime.h>
 #include <objc/objc.h>
@@ -214,6 +215,8 @@ enum {
     NSKeyDownMask = 1 << NSKeyDown,
     NSKeyUp = 11,
     NSKeyUpMask = 1 << NSKeyUp,
+    NSLeftMouseDragged = 6,
+    NSRightMouseDragged = 7,
 };
 
 static int running;
@@ -221,11 +224,12 @@ static int didResize;
 static id pool;
 static id window;
 static id openglContext;
+static AudioComponentInstance audioCompInstance;
 static clock_serv_t clockServ;
 static uint64_t lastTime = 0;
 
 float DeltaTime = 0;
-Vector2 mousePos;
+float mousePos[2] = {0};
 
 void *InternalCocoa(id window) { return NULL; }
 
@@ -447,10 +451,32 @@ static KeyboardKey ConvertKeyCode(uint16_t keyCode)
 {
     switch (keyCode)
     {
-        case kVK_ANSI_W: return KEY_W;
-        case kVK_ANSI_S: return KEY_S;
         case kVK_ANSI_A: return KEY_A;
+        case kVK_ANSI_B: return KEY_B;
+        case kVK_ANSI_C: return KEY_C;
         case kVK_ANSI_D: return KEY_D;
+        case kVK_ANSI_E: return KEY_E;
+        case kVK_ANSI_F: return KEY_F;
+        case kVK_ANSI_G: return KEY_G;
+        case kVK_ANSI_H: return KEY_H;
+        case kVK_ANSI_I: return KEY_I;
+        case kVK_ANSI_J: return KEY_J;
+        case kVK_ANSI_K: return KEY_K;
+        case kVK_ANSI_L: return KEY_L;
+        case kVK_ANSI_M: return KEY_M;
+        case kVK_ANSI_N: return KEY_N;
+        case kVK_ANSI_O: return KEY_O;
+        case kVK_ANSI_P: return KEY_P;
+        case kVK_ANSI_Q: return KEY_Q;
+        case kVK_ANSI_R: return KEY_R;
+        case kVK_ANSI_S: return KEY_S;
+        case kVK_ANSI_T: return KEY_T;
+        case kVK_ANSI_U: return KEY_U;
+        case kVK_ANSI_V: return KEY_V;
+        case kVK_ANSI_W: return KEY_W;
+        case kVK_ANSI_X: return KEY_X;
+        case kVK_ANSI_Y: return KEY_Y;
+        case kVK_ANSI_Z: return KEY_Z;
         default: break;
     }
     return KEY_UNKNOWN;
@@ -464,6 +490,8 @@ static void HandleEvents(id event)
 
     switch (type)
     {
+        case NSLeftMouseDragged:
+        case NSRightMouseDragged:
         case NSMouseMoved: {
 //            NSPoint loc = objc_msgSend_t(NSPoint)(event, sel("locationInWindow"));
             NSPoint loc = objc_msgSend_t(NSPoint)(window, sel("mouseLocationOutsideOfEventStream"));
@@ -477,8 +505,8 @@ static void HandleEvents(id event)
 
             NSSize s = WindowSize(window);
 
-            mousePos.x = loc.x;
-            mousePos.y = s.height-loc.y;
+            mousePos[0] = loc.x;
+            mousePos[1] = s.height-loc.y;
         } break;
         case NSLeftMouseDown: {
 
@@ -507,7 +535,7 @@ static void HandleEvents(id event)
 
             id chars = objc_msgSend_t(id)(event, sel("characters"));
             uint8_t *zstr = objc_msgSend_t(uint8_t*)(chars, sel("UTF8String"));
-            int zstrLen = strlen(zstr);
+            int zstrLen = strlen((char*)zstr);
 
             int c = zstrLen ? zstr[0] : 0;
 
@@ -521,7 +549,7 @@ static void HandleEvents(id event)
 
             id chars = objc_msgSend_t(id)(event, sel("characters"));
             uint8_t *zstr = objc_msgSend_t(uint8_t*)(chars, sel("UTF8String"));
-            int zstrLen = strlen(zstr);
+            int zstrLen = strlen((char*)zstr);
 
             int c = zstrLen ? zstr[0] : 0;
 
@@ -566,7 +594,7 @@ int D_Running(void)
 
     id event = 0;
     int visible = 0;
-
+    int count = 64;
     do {
         event = objc_msgSend_t(id, NSUInteger, id, id, BOOL)(NSApp, sel("nextEventMatchingMask:untilDate:inMode:dequeue:"), eventMask, nil, NSDefaultRunLoopMode, YES);
         if (event)
@@ -577,7 +605,8 @@ int D_Running(void)
         {
             visible = IsWindowVisible(window);
         }
-    } while (event != 0 || !visible);
+        count--;
+    } while ((event != 0 || !visible) && count > 0);
 
     objc_msgSend_void(NSApp, sel("updateWindows"));
     objc_msgSend_void(openglContext, sel("update"));
@@ -612,4 +641,82 @@ uint64_t D_GetTimeNS(void)
     return res;
 }
 
-#include "draw_gl.c"
+static OSStatus CocoaAudioCallback(
+    void *inRefCon,
+    AudioUnitRenderActionFlags *inActionFlags,
+    const AudioTimeStamp *inTimeStamp,
+    uint32_t inBusNumber,
+    uint32_t inNumberFrames,
+    AudioBufferList *ioData)
+{
+    float *buffer = (float*)ioData->mBuffers[0].mData;
+    HandleAudio(buffer, inNumberFrames);
+    return noErr;
+}
+
+void D_InitAudio(int sampleRate)
+{
+    AudioComponentDescription acd = {0};
+    acd.componentType = kAudioUnitType_Output;
+    acd.componentSubType = kAudioUnitSubType_DefaultOutput;
+    acd.componentManufacturer = kAudioUnitManufacturer_Apple;
+
+    AudioComponent component = AudioComponentFindNext(NULL, &acd);
+    if (!component) {
+        fprintf(stderr, "Failed to find an AudioComponent\n");
+        exit(-1);
+    }
+
+    OSStatus status = AudioComponentInstanceNew(component, &audioCompInstance);
+    if (status != noErr) exit(-1);
+
+    AudioStreamBasicDescription asbd = {0};
+    asbd.mSampleRate = sampleRate;
+    asbd.mFormatID = kAudioFormatLinearPCM;
+    asbd.mFormatFlags = kAudioFormatFlagIsFloat;
+    asbd.mFramesPerPacket = 1; // TODO: Investigate
+    asbd.mChannelsPerFrame = 2;
+    asbd.mBitsPerChannel = sizeof(float)*8;
+    asbd.mBytesPerFrame = sizeof(float)*2;
+    asbd.mBytesPerPacket = asbd.mBytesPerFrame * asbd.mFramesPerPacket;
+
+    status = AudioUnitSetProperty(audioCompInstance,
+                                  kAudioUnitProperty_StreamFormat,
+                                  kAudioUnitScope_Input,
+                                  0,
+                                  &asbd,
+                                  sizeof(asbd));
+    if (status != noErr) exit(-1);
+
+    AURenderCallbackStruct renderCallback;
+    renderCallback.inputProc = CocoaAudioCallback;
+    
+    status = AudioUnitSetProperty(
+        audioCompInstance,
+        kAudioUnitProperty_SetRenderCallback,
+        kAudioUnitScope_Input,
+        0,
+        &renderCallback,
+        sizeof(renderCallback));
+    if (status != noErr) exit(-1);
+
+    status = AudioUnitInitialize(audioCompInstance);
+    if (status != noErr) exit(-1);
+}
+
+void D_StartAudio(void)
+{
+    OSStatus status = AudioOutputUnitStart(audioCompInstance);
+    if (status != noErr) exit(-1);
+}
+
+void D_StopAudio(void)
+{
+    OSStatus status = AudioOutputUnitStop(audioCompInstance);
+    if (status != noErr) exit(-1);
+}
+
+void D_DeinitAudio(void)
+{
+    printf("[%s] !!!IMEPLEMENT ME!!!\n", __FUNCTION__);
+}

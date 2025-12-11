@@ -55,8 +55,8 @@ Vertex verts[3*TRIANGLE_COUNT];
 
 GLuint vbo, vao, prog;
 
-uint32_t D_ClearColor;
-uint32_t D_FillColor;
+static vec4_t colors[D_COLOR_TYPE_COUNT] = {0};
+
 float D_StrokeWidth = 3;
 
 static GLuint CompileShader(const char *src, int type, int *err)
@@ -124,6 +124,9 @@ static GLuint CompileProg(const char *vert, const char *frag)
 void D_GL_Init(void)
 {
 //    printf("Vertex shader: %s\n", vertexShader);
+    glEnable(GL_LINE_SMOOTH);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);  
 
     glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
@@ -143,18 +146,40 @@ void D_GL_Init(void)
     prog = CompileProg(vertexShader, fragmentShader);
 }
 
+void D_SetColor(ColorType type, float r, float g, float b, float a)
+{
+    colors[type][0] = r;
+    colors[type][1] = g;
+    colors[type][2] = b;
+    colors[type][3] = a;
+}
+
+void D_SetColorHex(ColorType type, uint32_t color)
+{
+    colors[type][0] = (float)((color >> 24)&0xFF)/255.f;
+    colors[type][1] = (float)((color >> 16)&0xFF)/255.f;
+    colors[type][2] = (float)((color >> 8)&0xFF)/255.f;
+    colors[type][3] = (float)((color)&0xFF)/255.f;
+}
+
+void D_SetColorVec4(ColorType type, vec4_t color)
+{
+    colors[type][0] = color[0];
+    colors[type][1] = color[1];
+    colors[type][2] = color[2];
+    colors[type][3] = color[3];
+}
+
 void D_ClearScreen(void)
 {
-    float r = (float)((D_ClearColor >> 24)&0xFF)/255.f;
-    float g = (float)((D_ClearColor >> 16)&0xFF)/255.f;
-    float b = (float)((D_ClearColor >> 8)&0xFF)/255.f;
-    float a = (float)((D_ClearColor)&0xFF)/255.f;
-
-    glClearColor(r, g, b, a);
+    glClearColor(colors[D_COLOR_CLEAR][0], 
+                 colors[D_COLOR_CLEAR][1], 
+                 colors[D_COLOR_CLEAR][2], 
+                 colors[D_COLOR_CLEAR][3]);
     glClear(GL_COLOR_BUFFER_BIT);
 }
 
-static void D_GL_Flush(void)
+static void D_GL_Flush(GLenum mode)
 {
     glUseProgram(prog);
     glBindVertexArray(vao);
@@ -167,7 +192,7 @@ static void D_GL_Flush(void)
     int resLoc = glGetUniformLocation(prog, "uResolution");
     glUniform2f(resLoc, w, h);
 
-    glDrawArrays(GL_TRIANGLES, 0, vertCount);
+    glDrawArrays(mode, 0, vertCount);
     vertCount = 0;
 }
 
@@ -175,7 +200,7 @@ static void D_GL_PushVertex(float x, float y, float z, float u, float v, float r
 {
     if (vertCount >= vertCap)
     {
-        D_GL_Flush();
+        D_GL_Flush(GL_TRIANGLES);
     }
 
     verts[vertCount++] = (Vertex){x,y,z,u,v,r,g,b,a};
@@ -183,10 +208,10 @@ static void D_GL_PushVertex(float x, float y, float z, float u, float v, float r
 
 void D_DrawFilledRect(float x, float y, float w, float h)
 {
-    float r = (float)((D_FillColor >> 24)&0xFF)/255.f;
-    float g = (float)((D_FillColor >> 16)&0xFF)/255.f;
-    float b = (float)((D_FillColor >> 8)&0xFF)/255.f;
-    float a = (float)((D_FillColor)&0xFF)/255.f;
+    float r = colors[D_COLOR_FILL][0];
+    float g = colors[D_COLOR_FILL][1];
+    float b = colors[D_COLOR_FILL][2];
+    float a = colors[D_COLOR_FILL][3];
 
     float x1 = x+w;
     float y1 = y+h;
@@ -199,17 +224,37 @@ void D_DrawFilledRect(float x, float y, float w, float h)
     D_GL_PushVertex(x, y1, 0, 0, 1, r, g, b, a);
     D_GL_PushVertex(x1, y1, 0, 1, 1, r, g, b, a);
 
-    D_GL_Flush();
+    D_GL_Flush(GL_TRIANGLES);
+}
+
+void D_DrawFilledCircle(float x, float y, float rad, int segCount)
+{
+    float r = colors[D_COLOR_FILL][0];
+    float g = colors[D_COLOR_FILL][1];
+    float b = colors[D_COLOR_FILL][2];
+    float a = colors[D_COLOR_FILL][3];
+
+    D_GL_PushVertex(x, y, 0, 0, 0, r, g, b, a);
+
+    for (int i = 0; i < segCount+1; ++i)
+    {
+        float a1 = i*2*M_PI/(float)segCount;
+        float a2 = (i+1)*2*M_PI/(float)segCount;
+
+        D_GL_PushVertex(x+rad*cos(a2), y+rad*sin(a2), 0, 0, 0, r, g, b, a);
+    }
+
+    D_GL_Flush(GL_TRIANGLE_FAN);
 }
 
 void D_DrawLine(float x1, float y1, float x2, float y2)
 {
     if (x1 == x2 && y1 == y2) return;
 
-    float r = (float)((D_FillColor >> 24)&0xFF)/255.f;
-    float g = (float)((D_FillColor >> 16)&0xFF)/255.f;
-    float b = (float)((D_FillColor >> 8)&0xFF)/255.f;
-    float a = (float)((D_FillColor)&0xFF)/255.f;
+    float r = colors[D_COLOR_FILL][0];
+    float g = colors[D_COLOR_FILL][1];
+    float b = colors[D_COLOR_FILL][2];
+    float a = colors[D_COLOR_FILL][3];
 
     float xdir = x2 - x1;
     float ydir = y2 - y1;
@@ -222,10 +267,88 @@ void D_DrawLine(float x1, float y1, float x2, float y2)
     D_GL_PushVertex(x1+xside, y1+yside, 0, 0, 0, r, g, b, a);
     D_GL_PushVertex(x2+xside, y2+yside, 0, 0, 0, r, g, b, a);
     D_GL_PushVertex(x1-xside, y1-yside, 0, 0, 0, r, g, b, a);
+    D_GL_PushVertex(x2-xside, y2-yside, 0, 0, 0, r, g, b, a);
+
+    D_GL_Flush(GL_TRIANGLE_STRIP);
+}
+
+static int segNum = 0;
+
+void D_BeginSegmentedLine(void)
+{
+    segNum = 0;
+}
+
+void D_DrawSegment(float x1, float y1, float x2, float y2)
+{
+    if (x1 == x2 && y1 == y2) return;
+
+    float r = colors[D_COLOR_FILL][0];
+    float g = colors[D_COLOR_FILL][1];
+    float b = colors[D_COLOR_FILL][2];
+    float a = colors[D_COLOR_FILL][3];
+
+    float xdir = x2 - x1;
+    float ydir = y2 - y1;
+
+    float len = sqrt(xdir*xdir + ydir*ydir);
+
+    float xside = (ydir/len)*D_StrokeWidth/2.f;
+    float yside = (-xdir/len)*D_StrokeWidth/2.f;
+
+    if (segNum == 0) {
+        D_GL_PushVertex(x1+xside, y1+yside, 0, 0, 0, r, g, b, a);
+        D_GL_PushVertex(x1-xside, y1-yside, 0, 0, 0, r, g, b, a);
+    }
 
     D_GL_PushVertex(x2+xside, y2+yside, 0, 0, 0, r, g, b, a);
     D_GL_PushVertex(x2-xside, y2-yside, 0, 0, 0, r, g, b, a);
-    D_GL_PushVertex(x1-xside, y1-yside, 0, 0, 0, r, g, b, a);
 
-    D_GL_Flush();
+    segNum++;
 }
+
+void D_EndSegmentedLine(void)
+{
+    D_GL_Flush(GL_TRIANGLE_STRIP);
+}
+
+void D_DrawBezier(float x1, float y1, float x2, float y2, float x3, float y3, float x4, float y4, int segCount)
+{
+    D_BeginSegmentedLine();
+
+        for (int i = 0; i < segCount; ++i)
+        {
+            float t = i/(float)segCount;
+            float xa = Lerp(x1, x2, t);
+            float ya = Lerp(y1, y2, t);
+            float xb = Lerp(x2, x3, t);
+            float yb = Lerp(y2, y3, t);
+            float xc = Lerp(x3, x4, t);
+            float yc = Lerp(y3, y4, t);
+            float xd = Lerp(xa, xb, t);
+            float yd = Lerp(ya, yb, t);
+            float xe = Lerp(xb, xc, t);
+            float ye = Lerp(yb, yc, t);
+            float xf1 = Lerp(xd, xe, t);
+            float yf1 = Lerp(yd, ye, t);
+
+            t = (i+1)/(float)segCount;
+            xa = Lerp(x1, x2, t);
+            ya = Lerp(y1, y2, t);
+            xb = Lerp(x2, x3, t);
+            yb = Lerp(y2, y3, t);
+            xc = Lerp(x3, x4, t);
+            yc = Lerp(y3, y4, t);
+            xd = Lerp(xa, xb, t);
+            yd = Lerp(ya, yb, t);
+            xe = Lerp(xb, xc, t);
+            ye = Lerp(yb, yc, t);
+            float xf2 = Lerp(xd, xe, t);
+            float yf2 = Lerp(yd, ye, t);
+
+            D_DrawSegment(xf1, yf1, xf2, yf2);
+        }
+
+        D_EndSegmentedLine();
+}
+
