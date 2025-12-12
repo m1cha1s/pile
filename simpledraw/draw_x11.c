@@ -3,9 +3,14 @@
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/keysym.h>
 #include <X11/keysymdef.h>
 
 #include <unistd.h>
+#include <time.h>
+
+#include <pulse/simple.h>
+#include <pulse/error.h>
 
 #include <GL/gl.h>
 #include <GL/glext.h>
@@ -52,9 +57,13 @@ static Window window;
 static int running;
 static GLXContext context = 0;
 static Atom atomWmDeleteWindow;
+static uint64_t lastTime = 0;
+
+static pa_context *audioContext = NULL;
+static pa_threaded_mainloop *psTMainloop = NULL;
 
 float DeltaTime = 0;
-Vector2 mousePos = {0};
+vec2_t mousePos = {0};
 
 typedef GLXContext (*glxCreateContextAttribsARBProc)(Display *, GLXFBConfig, GLXContext, Bool, const int *);
 
@@ -146,7 +155,7 @@ void D_Init(void)
         .background_pixel = WhitePixel( display, screenId ),
         .override_redirect = True,
         .colormap = XCreateColormap( display, rootWindow, visual->visual, AllocNone ),
-        .event_mask = ExposureMask,
+        .event_mask = ExposureMask | KeyPressMask|KeyReleaseMask,
     };
 
     window = XCreateWindow( display, rootWindow, 0, 0, 800, 600, 0, visual->depth, InputOutput, visual->visual, CWBackPixel | CWColormap | CWBorderPixel | CWEventMask, &windowAttribs );
@@ -201,34 +210,103 @@ void D_Deinit(void)
     XCloseDisplay( display );
 }
 
+KeyboardKey KeySymToKey(KeySym ks)
+{
+    switch (ks)
+    {
+    case XK_a: return KEY_A;
+    case XK_b: return KEY_B;
+    case XK_c: return KEY_C;
+    case XK_d: return KEY_D;
+    case XK_e: return KEY_E;
+    case XK_f: return KEY_F;
+    case XK_g: return KEY_G;
+    case XK_h: return KEY_H;
+    case XK_i: return KEY_I;
+    case XK_j: return KEY_J;
+    case XK_k: return KEY_K;
+    case XK_l: return KEY_L;
+    case XK_m: return KEY_M;
+    case XK_n: return KEY_N;
+    case XK_o: return KEY_O;
+    case XK_p: return KEY_P;
+    case XK_q: return KEY_Q;
+    case XK_r: return KEY_R;
+    case XK_s: return KEY_S;
+    case XK_t: return KEY_T;
+    case XK_u: return KEY_U;
+    case XK_v: return KEY_V;
+    case XK_w: return KEY_W;
+    case XK_x: return KEY_X;
+    case XK_y: return KEY_Y;
+    case XK_z: return KEY_Z;
+    }
+    return KEY_UNKNOWN;
+}
+
 int D_Running(void)
 {
     XEvent ev;
     while (XPending( display ) > 0)
     {
         XNextEvent( display, &ev );
-        if (ev.type == ClientMessage)
+        switch (ev.type)
         {
+        case ClientMessage: {
             if (ev.xclient.data.l[0] == atomWmDeleteWindow) running = 0;
+        } break;
+        case KeyPress: {
+            unsigned int keyCode = ev.xkey.keycode;
+            KeyboardKey key = KeySymToKey(XKeycodeToKeysym(display, keyCode, 0));
+            HandleKey(key, 0, 1);
+        } break;
+        case KeyRelease: {
+            unsigned int keyCode = ev.xkey.keycode;
+            KeyboardKey key = KeySymToKey(XKeycodeToKeysym(display, keyCode, 0));
+            HandleKey(key, 0, 0);
+        } break;
         }
     }
+
+    int w,h;
+    D_GetWindowDims(&w,&h);
+    glViewport(0,0,w,h);
 
     int mousex, mousey;
     unsigned int mask;
     XQueryPointer(display, window, &rootWindow, &rootWindow, &mousex, &mousey, &mousex, &mousey, &mask);
 
-    mousePos.x = mousex;
-    mousePos.y = mousey;
+    mousePos[0] = mousex;
+    mousePos[1] = mousey;
+
+    uint64_t now = D_GetTimeNS();
+
+    uint64_t diff = now - lastTime;
+
+    float newDeltaTime = (float)diff/1e9f;
+    if (newDeltaTime < 1) DeltaTime = newDeltaTime;
+
+    lastTime = now;
 
     return running;
 }
 
+uint64_t D_GetTimeNS(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    uint64_t res = (uint64_t)ts.tv_sec*1000000000+(uint64_t)ts.tv_nsec;
+    return res;
+}
+
 void D_SetWindowDims( int w, int h )
 {
+    XResizeWindow(display, window, w, h);
 }
 
 void D_SetWindowTitle( const char *title )
 {
+    XStoreName(display, window, title);
 }
 
 void D_Present(void)
@@ -243,3 +321,90 @@ void D_GetWindowDims( int *x, int *y )
 	*x = attrs.width;
 	*y = attrs.height;
 }
+
+static void PAContextCallback(pa_context *ctx, void *userData)
+{
+    pa_context_state_t state = pa_context_get_state(ctx);
+
+    switch (state)
+    {
+    case PA_CONTEXT_TERMINATED:
+    case PA_CONTEXT_FAILED:
+    case PA_CONTEXT_READY: {
+        pa_threaded_mainloop_signal(paTMainloop, 0);
+    } break;
+    default: brak;
+    }
+}
+
+static void Stre
+
+void D_InitAudio(int sampleRate)
+{
+    paTMainloop = pa_threaded_mainloop_new();
+    audioContext = pa_context_new(pa_threaded_mainloop_get_api(paTMainloop), "foobar");
+
+    pa_context_set_state_callback(audioContext, PAContextCallback, NULL);
+
+    pa_threaded_mainloop_start(paTMainloop);
+
+    pa_context_connect(audioContext, NULL, PA_CONTEXT_NOFLAGS, NULL);
+
+    pa_context_state_t state;
+
+    pa_threaded_mainloop_lock(paTMainloop);
+
+    state = pa_context_get_state(audioContext);
+
+    while (state != PA_CONTEXT_READY && state != PA_CONTEXT_FAILED && state != PA_CONTEXT_TERMINATED)
+    {
+        pa_threaded_mainloop_wait(paTMainloop);
+        state = pa_context_get_state(audioContext);
+    }
+
+    pa_threaded_mainloop_unlock(paTMainloop);
+
+    pa_sample_spec sampleSpec = {
+        .format = PA_SAMPLE_FLOAT32NE,
+        .rate = sampleRate,
+        .channels = 2, // Stereo
+    };
+
+    int paError = 0;
+    paSimpleContext = pa_simple_new(
+        NULL,
+        "simpledraw",
+        PA_STREAM_PLAYBACK,
+        NULL,
+        "Audio???",
+        &sampleSpec,
+        NULL,
+        NULL,
+        &paError
+        );
+
+    if (paSimpleContext == NULL)
+    {
+        fprintf("Error initializing pulse/pipewire: %s\n", pa_strerror(psError));
+        exit(-1);
+    }
+
+    
+}
+
+void D_DeinitAudio(void)
+{
+    if (paTMainloop)
+    {
+        pa_threaded_mainloop_free(paTMainloop);
+    }
+}
+
+void D_StartAudio(void)
+{
+}
+
+void D_StopAudio(void)
+{
+}
+
